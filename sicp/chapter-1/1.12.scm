@@ -1,0 +1,26 @@
+(define (pascal n)
+  (define (calculate-rows last-row counter)
+    (if (= counter 0)
+        '()
+        (let
+            ((new-row (calculate-row last-row 0)))
+          (cons new-row (calculate-rows new-row (- counter 1))))))
+  (define (calculate-row last-row carry)
+    (if (null? last-row)
+        (cons 1 '())
+        (cons
+         (+ carry (car last-row))
+         (calculate-row (cdr last-row) (car last-row)))))
+  (calculate-rows '() n))
+
+(define (pascal-hof n)
+  (define (next-row row)
+    (map + (cons 0 row) (append row '(0))))
+  (define (rows k row)
+    (if (= k 0)
+        '()
+        (cons row (rows (- k 1) (next-row row)))))
+  (rows n '(1)))
+
+(pascal 10)
+(pascal-hof 10)
