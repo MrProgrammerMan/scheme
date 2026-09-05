@@ -301,77 +301,180 @@
   const placedPairs = {};  // pairId -> {x,y} top-left of the double box
   const placedValues = {}; // valueId -> {x,y} top-left of the single box
 
+  // Two-pass layout:
+  //  Pass 1 (measure): walk each spine (a pair, plus any pairs reachable by
+  //    following cdr-cons links rightward) and, for every cell in it, compute
+  //    the width its own downward branch(es) need — a "column width" — plus
+  //    the height that branch consumes. This tells us up front how much
+  //    horizontal room a spine occupies INCLUDING anything hanging below it,
+  //    before we commit to any x-coordinates.
+  //  Pass 2 (place): walk the same structure again, now assigning absolute
+  //    x by accumulating the measured column widths left-to-right, so a
+  //    sibling spine can never be placed on top of a wide subtree that
+  //    dropped down from an earlier column.
+  //
+  // A "spine" is measured as an array of column records, one per cell:
+  //   { colWidth, downBranch: null | {kind, id, width, height} }
+  // colWidth is max(PAIR_W, downBranch.width) — the horizontal space this
+  // column must reserve so nothing below it gets clipped by the next column.
+
   function layout() {
     for (const k in placedPairs) delete placedPairs[k];
     for (const k in placedValues) delete placedValues[k];
     const edges = []; // {from:pairId, side:'car'|'cdr', toKind:'pair'|'value', to:id}
-    const visitedPairs = new Set();
+    const measuring = new Set(); // guards against infinite recursion on cycles
+    const measureCache = new Map(); // pairId -> spine measurement (memoized)
 
-    function layoutValueLeaf(valueId, x, y) {
-      if (!placedValues[valueId]) placedValues[valueId] = { x, y };
-      return { width: VBOX_W, height: VBOX_H };
+    function ROW_GAP_FOR(branch) {
+      return branch.kind === 'value' ? VAL_ROW_GAP : ROW_GAP;
     }
 
-    // returns {width, height} of subtree occupied, given top-left (x,y)
-    // for the pair at pairId, drawn as a horizontal spine going right
-    // through cdr-cons links, with branches dropping down.
-    function layoutSpine(pairId, x, y) {
-      if (visitedPairs.has(pairId)) {
-        return { width: PAIR_W, height: BOX_H };
+    // Measure a downward branch (car, or cdr-as-value) hanging off a cell.
+    // Returns {kind:'pair'|'value', id, width, height, spine?} or null.
+    function measureDownBranch(slot) {
+      if (slot.kind === 'cons' && slot.target) {
+        const sub = measureSpine(slot.target);
+        return { kind: 'pair', id: slot.target, width: sub.totalWidth, height: sub.totalHeight, spine: sub };
+      } else if (slot.kind === 'value' && slot.target) {
+        return { kind: 'value', id: slot.target, width: VBOX_W, height: VBOX_H };
       }
-      visitedPairs.add(pairId);
-      const node = pairs[pairId];
-      placedPairs[pairId] = { x, y };
-
-      let maxBottom = y + BOX_H;
-      let cursorX = x + PAIR_W;
-      let spineWidth = PAIR_W;
-
-      // Handle car first — always branches downward (value or cons)
-      if (node.car.kind === 'cons' && node.car.target) {
-        const childX = x;
-        const childY = y + BOX_H + ROW_GAP;
-        edges.push({ from: pairId, side: 'car', toKind: 'pair', to: node.car.target });
-        if (!placedPairs[node.car.target]) {
-          const sub = layoutSpine(node.car.target, childX, childY);
-          maxBottom = Math.max(maxBottom, childY + sub.height);
-          spineWidth = Math.max(spineWidth, sub.width);
-        }
-      } else if (node.car.kind === 'value' && node.car.target) {
-        const childX = x;
-        const childY = y + BOX_H + VAL_ROW_GAP;
-        edges.push({ from: pairId, side: 'car', toKind: 'value', to: node.car.target });
-        if (!placedValues[node.car.target]) {
-          const sub = layoutValueLeaf(node.car.target, childX, childY);
-          maxBottom = Math.max(maxBottom, childY + sub.height);
-          spineWidth = Math.max(spineWidth, sub.width);
-        }
-      }
-
-      // Handle cdr: cons continues the spine rightward; value drops below
-      if (node.cdr.kind === 'cons' && node.cdr.target) {
-        edges.push({ from: pairId, side: 'cdr', toKind: 'pair', to: node.cdr.target });
-        if (!placedPairs[node.cdr.target]) {
-          const sub = layoutSpine(node.cdr.target, cursorX + COL_GAP, y);
-          maxBottom = Math.max(maxBottom, y + sub.height);
-          spineWidth = (cursorX + COL_GAP - x) + sub.width;
-        }
-      } else if (node.cdr.kind === 'value' && node.cdr.target) {
-        const childX = x + BOX_W;
-        const childY = y + BOX_H + VAL_ROW_GAP;
-        edges.push({ from: pairId, side: 'cdr', toKind: 'value', to: node.cdr.target });
-        if (!placedValues[node.cdr.target]) {
-          const sub = layoutValueLeaf(node.cdr.target, childX, childY);
-          maxBottom = Math.max(maxBottom, childY + sub.height);
-          spineWidth = Math.max(spineWidth, (childX - x) + sub.width);
-        }
-      }
-
-      return { width: spineWidth, height: maxBottom - y };
+      return null;
     }
 
-    const bbox = layoutSpine(rootId, MARGIN, MARGIN + 24);
-    return { edges, bbox };
+    // Measure a whole spine starting at pairId: walk cdr-cons links,
+    // collecting one column per cell. Each column reserves an independent
+    // LEFT half-width (for a car-branch dropping under the left box) and
+    // RIGHT half-width (for a cdr-value-branch dropping under the right
+    // box), so the two can never collide even if one is much wider than
+    // a single box.
+    function measureSpine(pairId) {
+      if (measureCache.has(pairId)) return measureCache.get(pairId);
+      if (measuring.has(pairId)) {
+        // cycle guard: treat as a single bare cell with no further extent
+        return { columns: [{ pairId, leftW: BOX_W, rightW: BOX_W, carBranch: null }], totalWidth: PAIR_W, totalHeight: BOX_H };
+      }
+      measuring.add(pairId);
+
+      const columns = [];
+      let cursor = pairId;
+      let totalHeight = BOX_H;
+
+      while (true) {
+        const node = pairs[cursor];
+        const carBranch = measureDownBranch(node.car);
+        let leftW = BOX_W;
+        let rightW = BOX_W;
+        let colDownHeight = 0;
+
+        if (carBranch) {
+          leftW = Math.max(leftW, carBranch.width);
+          colDownHeight = Math.max(colDownHeight, ROW_GAP_FOR(carBranch) + carBranch.height);
+        }
+
+        let cdrValueBranch = null;
+        let cdrJumpsTo = null;
+        const isSpineEnd = !(node.cdr.kind === 'cons' && node.cdr.target);
+
+        if (node.cdr.kind === 'value' && node.cdr.target) {
+          cdrValueBranch = { kind: 'value', id: node.cdr.target, width: VBOX_W, height: VBOX_H };
+          rightW = Math.max(rightW, cdrValueBranch.width);
+          colDownHeight = Math.max(colDownHeight, VAL_ROW_GAP + VBOX_H);
+        }
+
+        columns.push({ pairId: cursor, leftW, rightW, carBranch, cdrValueBranch });
+        totalHeight = Math.max(totalHeight, BOX_H + colDownHeight);
+
+        if (node.cdr.kind === 'cons' && node.cdr.target && !measuring.has(node.cdr.target) && !measureCache.has(node.cdr.target)) {
+          cursor = node.cdr.target;
+          continue;
+        } else if (node.cdr.kind === 'cons' && node.cdr.target) {
+          // cdr points back into already-measured/measuring structure (cycle
+          // or shared spine) — stop extending this spine here; an edge will
+          // still be drawn to wherever that pair ends up placed.
+          columns[columns.length - 1].cdrJumpsTo = node.cdr.target;
+          break;
+        } else {
+          break;
+        }
+      }
+
+      const totalWidth = columns.reduce((s, c) => s + c.leftW + c.rightW, 0) + COL_GAP * (columns.length - 1);
+      const result = { columns, totalWidth, totalHeight };
+      measuring.delete(pairId);
+      measureCache.set(pairId, result);
+      return result;
+    }
+
+    // Place a measured spine at top-left (x,y), recording positions and edges.
+    const placedSpines = new Set();
+    function placeSpine(pairId, x, y) {
+      const spine = measureCache.get(pairId) || measureSpine(pairId);
+      if (placedSpines.has(pairId)) return; // already placed (shared structure)
+      placedSpines.add(pairId);
+
+      let colX = x;
+      spine.columns.forEach(col => {
+        // the pair's actual box sits with its divider at the boundary
+        // between the reserved left and right half-widths
+        const boxX = colX + (col.leftW - BOX_W);
+        if (!placedPairs[col.pairId]) {
+          placedPairs[col.pairId] = { x: boxX, y };
+        }
+        const node = pairs[col.pairId];
+
+        // car branch: drops below, centered under the LEFT half's reserved width
+        if (col.carBranch) {
+          const branch = col.carBranch;
+          const childY = y + BOX_H + ROW_GAP_FOR(branch);
+          edges.push({ from: col.pairId, side: 'car', toKind: branch.kind, to: branch.id });
+          if (branch.kind === 'pair') {
+            const childX = colX + (col.leftW - branch.spine.totalWidth) / 2;
+            placeSpine(branch.id, childX, childY);
+          } else if (!placedValues[branch.id]) {
+            placedValues[branch.id] = { x: colX + (col.leftW - VBOX_W) / 2, y: childY };
+          }
+        }
+
+        // cdr -> value branch: drops below, centered under the RIGHT half's reserved width
+        if (col.cdrValueBranch) {
+          const branch = col.cdrValueBranch;
+          const childY = y + BOX_H + VAL_ROW_GAP;
+          const rightStartX = colX + col.leftW;
+          edges.push({ from: col.pairId, side: 'cdr', toKind: 'value', to: branch.id });
+          if (!placedValues[branch.id]) {
+            placedValues[branch.id] = { x: rightStartX + (col.rightW - VBOX_W) / 2, y: childY };
+          }
+        }
+
+        // cdr -> cons continuing the spine, or jumping into shared/cyclic
+        // structure already accounted for elsewhere.
+        if (node.cdr.kind === 'cons' && node.cdr.target) {
+          edges.push({ from: col.pairId, side: 'cdr', toKind: 'pair', to: node.cdr.target });
+          if (col.cdrJumpsTo && !placedPairs[col.cdrJumpsTo]) {
+            // shared structure this spine didn't walk into during measure;
+            // place it fresh, stacked to the right as a fallback position
+            placeSpine(col.cdrJumpsTo, colX + col.leftW + col.rightW + COL_GAP, y);
+          }
+        }
+
+        colX += col.leftW + col.rightW + COL_GAP;
+      });
+    }
+
+    measureSpine(rootId);
+    placeSpine(rootId, MARGIN, MARGIN + 24);
+
+    // overall bbox for the svg canvas
+    let maxX = 0, maxY = 0;
+    for (const id in placedPairs) {
+      maxX = Math.max(maxX, placedPairs[id].x + PAIR_W);
+      maxY = Math.max(maxY, placedPairs[id].y + BOX_H);
+    }
+    for (const id in placedValues) {
+      maxX = Math.max(maxX, placedValues[id].x + VBOX_W);
+      maxY = Math.max(maxY, placedValues[id].y + VBOX_H);
+    }
+    return { edges, bbox: { width: maxX - MARGIN, height: maxY - MARGIN } };
   }
 
   // ----- Rendering -----
