@@ -11,6 +11,10 @@
         dest = "diagrams";
         src = ../diagrams;
       }
+      {
+        dest = "code";
+        src = ../code;
+      }
       # Add paths that must be locally accessible to typst here
       # {
       #   dest = "icons";
