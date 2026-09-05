@@ -101,11 +101,10 @@ Dette dokumentet inneholder svar på tegne-oppgavene i oblig 1b. Jeg har også v
 
 #pagebreak()
 
-= Appendix (kopi av kode)
-
 #show raw.where(block: true): set block(width: 100%)
 
-#figure(
-  raw(read("code/oblig1b.scm"), lang: "lisp", block: true),
-  caption: [oblig1b.scm, ligger også vedlagt ved siden av dette dokumentet]
-)
+= *Appendix (kopi av kode)*
+
+#text(size: 9pt)[oblig1b.scm, ligger også vedlagt ved siden av dette dokumentet.] 
+
+#raw( read("code/oblig1b.scm"), lang: "lisp", block: true, )
