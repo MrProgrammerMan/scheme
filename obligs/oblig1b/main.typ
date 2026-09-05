@@ -3,7 +3,7 @@
 #set text(lang: "nb")
 
 #align(center + horizon)[
-  #text(2em, weight: "bold")[IN2040 - oblig 2]
+  #text(2em, weight: "bold")[IN2040 - oblig 1b]
   #v(10pt)
   Jonas Hazeland Baugerud \
   #datetime.today().display()
@@ -11,7 +11,7 @@
 
 #v(250pt)
 
-Dette dokumentet inneholder svar på tegne-oppgavene i oblig 2. Jeg har også vedlagt scheme-koden, men den er identisk til den som ligger i oblig2.scm(levert sammen med dokumentet).
+Dette dokumentet inneholder svar på tegne-oppgavene i oblig 1b. Jeg har også vedlagt scheme-koden, men den er identisk til den som ligger i oblig1b.scm(levert sammen med dokumentet).
 
 #pagebreak()
 
