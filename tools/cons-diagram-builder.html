@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Cons Cell Diagram Builder</title>
+<style>
+  :root {
+    --ink: #1a1a1a;
+    --paper: #fafaf8;
+    --line: #d8d6d0;
+    --accent: #b5432f;
+    --mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
+    --sans: 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+  }
+  body {
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    padding: 18px 24px 14px;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    align-items: baseline;
+    gap: 18px;
+    flex-wrap: wrap;
+  }
+  header h1 {
+    font-size: 17px;
+    font-weight: 600;
+    margin: 0;
+    letter-spacing: 0.2px;
+  }
+  header .sub {
+    font-size: 13px;
+    color: #77746c;
+    font-family: var(--mono);
+  }
+  .toolbar {
+    margin-left: auto;
+    display: flex;
+    gap: 8px;
+  }
+  button.tool {
+    font-family: var(--mono);
+    font-size: 12px;
+    background: transparent;
+    border: 1px solid var(--line);
+    color: var(--ink);
+    padding: 7px 12px;
+    cursor: pointer;
+    border-radius: 3px;
+  }
+  button.tool:hover {
+    border-color: var(--ink);
+  }
+  button.tool.danger:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  main {
+    flex: 1;
+    position: relative;
+    overflow: auto;
+  }
+  #canvas-wrap {
+    min-width: 100%;
+    min-height: 100%;
+    display: flex;
+    align-items: flex-start;
+    justify-content: flex-start;
+    padding: 60px;
+  }
+  svg#diagram {
+    display: block;
+    overflow: visible;
+  }
+  .cell-rect {
+    fill: var(--paper);
+    stroke: var(--ink);
+    stroke-width: 1.6;
+    cursor: pointer;
+  }
+  .cell-rect:hover {
+    fill: #f0eee6;
+  }
+  .cell-divider {
+    stroke: var(--ink);
+    stroke-width: 1.6;
+  }
+  .nil-dash {
+    stroke: var(--ink);
+    stroke-width: 1.4;
+  }
+  .cell-text {
+    font-family: var(--mono);
+    font-size: 14px;
+    fill: var(--ink);
+    text-anchor: middle;
+    dominant-baseline: central;
+    pointer-events: none;
+    user-select: none;
+  }
+  .ptr-dot {
+    fill: var(--ink);
+  }
+  .ptr-line {
+    stroke: var(--ink);
+    stroke-width: 1.4;
+    fill: none;
+  }
+  .ptr-arrowhead {
+    fill: var(--ink);
+  }
+  .root-label {
+    font-family: var(--mono);
+    font-size: 12px;
+    fill: #77746c;
+  }
+
+  /* Popover editor */
+  #editor {
+    position: fixed;
+    display: none;
+    background: var(--paper);
+    border: 1px solid var(--ink);
+    border-radius: 4px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.12);
+    padding: 10px;
+    font-family: var(--mono);
+    font-size: 13px;
+    z-index: 100;
+    min-width: 190px;
+  }
+  #editor .row {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  #editor select {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    padding: 5px 6px;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    background: white;
+    flex: 1;
+  }
+  #editor input[type=text] {
+    font-family: var(--mono);
+    font-size: 13px;
+    padding: 6px 7px;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    width: 100%;
+    margin-bottom: 8px;
+  }
+  #editor .actions {
+    display: flex;
+    justify-content: space-between;
+    gap: 6px;
+  }
+  #editor button {
+    font-family: var(--mono);
+    font-size: 12px;
+    border: 1px solid var(--line);
+    background: transparent;
+    padding: 5px 10px;
+    border-radius: 3px;
+    cursor: pointer;
+  }
+  #editor button.primary {
+    border-color: var(--ink);
+    background: var(--ink);
+    color: var(--paper);
+  }
+  #editor button:hover.primary { opacity: 0.85; }
+  #editor .hint {
+    color: #999;
+    font-size: 11px;
+    margin-top: 2px;
+  }
+
+  footer {
+    border-top: 1px solid var(--line);
+    padding: 8px 24px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: #999;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Box &amp; Pointer</h1>
+  <div class="sub">cons-cell diagram builder</div>
+  <div class="toolbar">
+    <button class="tool" id="btn-new">new root</button>
+    <button class="tool" id="btn-export">export svg</button>
+    <button class="tool danger" id="btn-clear">clear</button>
+  </div>
+</header>
+
+<main>
+  <div id="canvas-wrap">
+    <svg id="diagram" xmlns="http://www.w3.org/2000/svg"></svg>
+  </div>
+</main>
+
+<div id="editor">
+  <div class="row">
+    <select id="ed-kind">
+      <option value="value">value (points to a box)</option>
+      <option value="nil">nil</option>
+      <option value="cons">cons (points to a pair)</option>
+    </select>
+  </div>
+  <div id="ed-value-wrap">
+    <input type="text" id="ed-value" placeholder="e.g. 42 or foo" />
+  </div>
+  <div class="actions">
+    <button id="ed-cancel">cancel</button>
+    <button class="primary" id="ed-ok">apply</button>
+  </div>
+</div>
+
+<footer>click any half-box to set it &middot; boxes are fixed-size &middot; last cdr = nil renders as a diagonal slash</footer>
+
+<script>
+(function(){
+  "use strict";
+
+  // ----- Data model -----
+  // A "pair" node: { id, car: slot, cdr: slot } — a cons cell, drawn as a
+  // double box. Every half of a pair is a POINTER (a slot): it either
+  // points to a value-box, points to another pair, or is nil (points to
+  // nothing). There is no "inline text" state any more — a value lives in
+  // its own separate single box, and the cons half holds a dot + arrow to
+  // it, exactly like a cons-to-pair pointer does.
+  //
+  // A "slot": { kind: 'empty' | 'value' | 'nil' | 'cons', target?: id }
+  //   - 'empty': nothing chosen yet (rendered as a faint dot placeholder)
+  //   - 'nil':   diagonal slash, no outgoing arrow
+  //   - 'value': arrow to a valueBox { id, text }
+  //   - 'cons':  arrow to another pair
+  let nextId = 1;
+  const pairs = {};     // id -> pair node
+  const valueBoxes = {}; // id -> { id, text }
+
+  function makeSlot() { return { kind: 'empty' }; }
+  function makePair() {
+    const id = 'p' + (nextId++);
+    pairs[id] = { id, car: makeSlot(), cdr: makeSlot() };
+    return id;
+  }
+  function makeValueBox(text) {
+    const id = 'v' + (nextId++);
+    valueBoxes[id] = { id, text: text || '' };
+    return id;
+  }
+
+  let rootId = null;
+
+  function resetModel() {
+    for (const k in pairs) delete pairs[k];
+    for (const k in valueBoxes) delete valueBoxes[k];
+    nextId = 1;
+    rootId = makePair();
+  }
+  resetModel();
+
+  // ----- Layout constants -----
+  const BOX_W = 44;      // width of one half-box (car or cdr)
+  const BOX_H = 44;      // height of a box
+  const PAIR_W = BOX_W * 2;
+  const VBOX_W = 44;     // width of a standalone value box
+  const VBOX_H = 44;
+  const COL_GAP = 70;    // horizontal gap between sibling subtrees
+  const ROW_GAP = 90;    // vertical gap between a cell and its cons children
+  const VAL_ROW_GAP = 70; // vertical gap when dropping to a value box below
+  const MARGIN = 20;
+
+  // ----- Layout algorithm -----
+  // Pairs (double boxes) and value-boxes (single boxes) are both nodes we
+  // place on a canvas, then connect with pointer arrows. A pair's car/cdr
+  // pointer targets are laid out as:
+  //   - cdr -> cons: continues the spine to the right (classic list shape)
+  //   - car -> cons: drops to a new row below, centered under that box
+  //   - either -> value: drops a small single box below that half
+  //   - nil / empty: no child, nothing to place
+  // We compute this recursively, returning a subtree bounding box, and
+  // record absolute (x,y) positions for every pair and value-box as we go.
+
+  const placedPairs = {};  // pairId -> {x,y} top-left of the double box
+  const placedValues = {}; // valueId -> {x,y} top-left of the single box
+
+  function layout() {
+    for (const k in placedPairs) delete placedPairs[k];
+    for (const k in placedValues) delete placedValues[k];
+    const edges = []; // {from:pairId, side:'car'|'cdr', toKind:'pair'|'value', to:id}
+    const visitedPairs = new Set();
+
+    function layoutValueLeaf(valueId, x, y) {
+      if (!placedValues[valueId]) placedValues[valueId] = { x, y };
+      return { width: VBOX_W, height: VBOX_H };
+    }
+
+    // returns {width, height} of subtree occupied, given top-left (x,y)
+    // for the pair at pairId, drawn as a horizontal spine going right
+    // through cdr-cons links, with branches dropping down.
+    function layoutSpine(pairId, x, y) {
+      if (visitedPairs.has(pairId)) {
+        return { width: PAIR_W, height: BOX_H };
+      }
+      visitedPairs.add(pairId);
+      const node = pairs[pairId];
+      placedPairs[pairId] = { x, y };
+
+      let maxBottom = y + BOX_H;
+      let cursorX = x + PAIR_W;
+      let spineWidth = PAIR_W;
+
+      // Handle car first — always branches downward (value or cons)
+      if (node.car.kind === 'cons' && node.car.target) {
+        const childX = x;
+        const childY = y + BOX_H + ROW_GAP;
+        edges.push({ from: pairId, side: 'car', toKind: 'pair', to: node.car.target });
+        if (!placedPairs[node.car.target]) {
+          const sub = layoutSpine(node.car.target, childX, childY);
+          maxBottom = Math.max(maxBottom, childY + sub.height);
+          spineWidth = Math.max(spineWidth, sub.width);
+        }
+      } else if (node.car.kind === 'value' && node.car.target) {
+        const childX = x;
+        const childY = y + BOX_H + VAL_ROW_GAP;
+        edges.push({ from: pairId, side: 'car', toKind: 'value', to: node.car.target });
+        if (!placedValues[node.car.target]) {
+          const sub = layoutValueLeaf(node.car.target, childX, childY);
+          maxBottom = Math.max(maxBottom, childY + sub.height);
+          spineWidth = Math.max(spineWidth, sub.width);
+        }
+      }
+
+      // Handle cdr: cons continues the spine rightward; value drops below
+      if (node.cdr.kind === 'cons' && node.cdr.target) {
+        edges.push({ from: pairId, side: 'cdr', toKind: 'pair', to: node.cdr.target });
+        if (!placedPairs[node.cdr.target]) {
+          const sub = layoutSpine(node.cdr.target, cursorX + COL_GAP, y);
+          maxBottom = Math.max(maxBottom, y + sub.height);
+          spineWidth = (cursorX + COL_GAP - x) + sub.width;
+        }
+      } else if (node.cdr.kind === 'value' && node.cdr.target) {
+        const childX = x + BOX_W;
+        const childY = y + BOX_H + VAL_ROW_GAP;
+        edges.push({ from: pairId, side: 'cdr', toKind: 'value', to: node.cdr.target });
+        if (!placedValues[node.cdr.target]) {
+          const sub = layoutValueLeaf(node.cdr.target, childX, childY);
+          maxBottom = Math.max(maxBottom, childY + sub.height);
+          spineWidth = Math.max(spineWidth, (childX - x) + sub.width);
+        }
+      }
+
+      return { width: spineWidth, height: maxBottom - y };
+    }
+
+    const bbox = layoutSpine(rootId, MARGIN, MARGIN + 24);
+    return { edges, bbox };
+  }
+
+  // ----- Rendering -----
+  const svg = document.getElementById('diagram');
+  const NS = "http://www.w3.org/2000/svg";
+
+  function el(tag, attrs) {
+    const e = document.createElementNS(NS, tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+
+  function slotCenter(pairId, side) {
+    const p = placedPairs[pairId];
+    const x = side === 'car' ? p.x + BOX_W / 2 : p.x + BOX_W + BOX_W / 2;
+    const y = p.y + BOX_H / 2;
+    return { x, y };
+  }
+
+  function pairTopCenter(pairId) {
+    const p = placedPairs[pairId];
+    return { x: p.x + PAIR_W / 2, y: p.y };
+  }
+
+  function valueTopCenter(valueId) {
+    const v = placedValues[valueId];
+    return { x: v.x + VBOX_W / 2, y: v.y };
+  }
+
+  function drawArrow(g, x1, y1, x2, y2) {
+    // small dot at origin, line + arrowhead at destination
+    g.appendChild(el('circle', { cx: x1, cy: y1, r: 3, class: 'ptr-dot' }));
+
+    // Route: simple orthogonal-ish path if mostly vertical or horizontal,
+    // else a smooth cubic curve.
+    const dx = x2 - x1, dy = y2 - y1;
+    let d;
+    if (Math.abs(dx) < 2) {
+      d = `M ${x1} ${y1} L ${x2} ${y2}`;
+    } else if (Math.abs(dy) < 2) {
+      d = `M ${x1} ${y1} L ${x2} ${y2}`;
+    } else {
+      // curve down then across, exits bottom of source, enters top of target
+      const midY = y1 + Math.max(24, dy * 0.5);
+      d = `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`;
+    }
+    const path = el('path', { d, class: 'ptr-line' });
+    g.appendChild(path);
+
+    // arrowhead direction: approximate using end tangent
+    let angle;
+    if (Math.abs(dx) < 2) {
+      angle = Math.atan2(y2 - y1, 0.0001);
+    } else if (Math.abs(dy) < 2) {
+      angle = Math.atan2(0.0001, x2 - x1);
+    } else {
+      // tangent near the end of the cubic curve ~ direction from control pt to end
+      const midY = y1 + Math.max(24, dy * 0.5);
+      angle = Math.atan2(y2 - midY, x2 - x2 + 0.0001) ; // near-vertical entry
+      angle = Math.atan2(y2 - midY, 0.0001);
+    }
+    const AR = 6;
+    const ax = x2 - AR * Math.cos(angle - 0.35);
+    const ay = y2 - AR * Math.sin(angle - 0.35);
+    const bx = x2 - AR * Math.cos(angle + 0.35);
+    const by = y2 - AR * Math.sin(angle + 0.35);
+    const head = el('polygon', {
+      points: `${x2},${y2} ${ax},${ay} ${bx},${by}`,
+      class: 'ptr-arrowhead'
+    });
+    g.appendChild(head);
+  }
+
+  function render() {
+    svg.innerHTML = '';
+    const { edges, bbox } = layout();
+
+    const totalW = bbox.width + MARGIN * 2 + PAIR_W;
+    const totalH = bbox.height + MARGIN * 2 + 40;
+    svg.setAttribute('width', Math.max(totalW, 300));
+    svg.setAttribute('height', Math.max(totalH, 200));
+    svg.setAttribute('viewBox', `0 0 ${Math.max(totalW,300)} ${Math.max(totalH,200)}`);
+
+    const gEdges = el('g', { class: 'edges' });
+    const gBoxes = el('g', { class: 'boxes' });
+    svg.appendChild(gEdges);
+    svg.appendChild(gBoxes);
+
+    // root label
+    const rootPos = placedPairs[rootId];
+    const label = el('text', { x: rootPos.x, y: rootPos.y - 10, class: 'root-label' });
+    label.textContent = 'root';
+    svg.appendChild(label);
+
+    // draw all pairs (double boxes) — every half is a pointer: a dot if it
+    // points somewhere (value or cons), a diagonal slash if nil, or a faint
+    // placeholder dot if not yet set.
+    for (const pairId in placedPairs) {
+      const { x, y } = placedPairs[pairId];
+      const node = pairs[pairId];
+
+      const rect = el('rect', {
+        x, y, width: PAIR_W, height: BOX_H,
+        class: 'cell-rect', rx: 0
+      });
+      gBoxes.appendChild(rect);
+
+      gBoxes.appendChild(el('line', {
+        x1: x + BOX_W, y1: y, x2: x + BOX_W, y2: y + BOX_H,
+        class: 'cell-divider'
+      }));
+
+      ['car','cdr'].forEach(side => {
+        const slot = node[side];
+        const sx = side === 'car' ? x : x + BOX_W;
+        const cx = sx + BOX_W/2, cy = y + BOX_H/2;
+
+        const hit = el('rect', {
+          x: sx, y: y, width: BOX_W, height: BOX_H,
+          fill: 'transparent',
+          'data-pair': pairId, 'data-side': side,
+          class: 'hit-area', style: 'cursor:pointer'
+        });
+        hit.addEventListener('click', (e) => openEditor(pairId, side, e));
+        gBoxes.appendChild(hit);
+
+        if (slot.kind === 'nil') {
+          gBoxes.appendChild(el('line', {
+            x1: sx + 6, y1: y + BOX_H - 6,
+            x2: sx + BOX_W - 6, y2: y + 6,
+            class: 'nil-dash'
+          }));
+        } else if ((slot.kind === 'value' || slot.kind === 'cons') && slot.target) {
+          gBoxes.appendChild(el('circle', { cx, cy, r: 3.2, class: 'ptr-dot' }));
+        } else if (slot.kind === 'empty') {
+          const t = el('text', { x: cx, y: cy, class: 'cell-text' });
+          t.setAttribute('fill', '#c9c6bd');
+          t.textContent = '·';
+          gBoxes.appendChild(t);
+        }
+      });
+    }
+
+    // draw standalone value boxes (single square, holds the literal text)
+    for (const valueId in placedValues) {
+      const { x, y } = placedValues[valueId];
+      const vbox = valueBoxes[valueId];
+
+      const rect = el('rect', {
+        x, y, width: VBOX_W, height: VBOX_H,
+        class: 'cell-rect value-box', rx: 0,
+        'data-value-id': valueId, style: 'cursor:pointer'
+      });
+      rect.addEventListener('click', (e) => openValueEditor(valueId, e));
+      gBoxes.appendChild(rect);
+
+      const t = el('text', { x: x + VBOX_W/2, y: y + VBOX_H/2, class: 'cell-text' });
+      t.textContent = vbox.text || '';
+      gBoxes.appendChild(t);
+    }
+
+    // draw pointer arrows: from a pair-half to either a pair or a value box
+    edges.forEach(e => {
+      const from = slotCenter(e.from, e.side);
+      const to = e.toKind === 'value' ? valueTopCenter(e.to) : pairTopCenter(e.to);
+      drawArrow(gEdges, from.x, from.y, to.x, to.y);
+    });
+  }
+
+  // ----- Editor popover -----
+  const editor = document.getElementById('editor');
+  const edKind = document.getElementById('ed-kind');
+  const edValueWrap = document.getElementById('ed-value-wrap');
+  const edValue = document.getElementById('ed-value');
+  let editing = null; // {pairId, side}
+
+  // editing = { mode: 'slot', pairId, side } | { mode: 'valuebox', valueId }
+  function positionEditor(rect) {
+    editor.style.display = 'block';
+    const ew = 210, eh = 130;
+    let left = rect.right + 10;
+    let top = rect.top;
+    if (left + ew > window.innerWidth) left = rect.left - ew - 10;
+    if (top + eh > window.innerHeight) top = window.innerHeight - eh - 10;
+    editor.style.left = left + 'px';
+    editor.style.top = top + 'px';
+  }
+
+  // Click on a cons half: choose value / nil / cons for that pointer.
+  function openEditor(pairId, side, evt) {
+    editing = { mode: 'slot', pairId, side };
+    const slot = pairs[pairId][side];
+    edKind.value = slot.kind === 'empty' ? 'value' : slot.kind;
+    updateEditorFields();
+    // if it already points to a value box, let them edit that text inline too
+    if (slot.kind === 'value' && slot.target) {
+      edValue.value = valueBoxes[slot.target].text || '';
+    } else {
+      edValue.value = '';
+    }
+    positionEditor(evt.target.getBoundingClientRect());
+    edValue.focus();
+  }
+
+  // Click on a standalone value box: edit its text directly.
+  function openValueEditor(valueId, evt) {
+    editing = { mode: 'valuebox', valueId };
+    edKind.value = 'value';
+    edKind.disabled = true;
+    edValueWrap.style.display = 'block';
+    edValue.value = valueBoxes[valueId].text || '';
+    positionEditor(evt.target.getBoundingClientRect());
+    edValue.focus();
+    edValue.select();
+  }
+
+  function updateEditorFields() {
+    edKind.disabled = false;
+    edValueWrap.style.display = edKind.value === 'value' ? 'block' : 'none';
+  }
+  edKind.addEventListener('change', updateEditorFields);
+
+  function closeEditor() {
+    editor.style.display = 'none';
+    edKind.disabled = false;
+    editing = null;
+  }
+
+  document.getElementById('ed-cancel').addEventListener('click', closeEditor);
+
+  document.getElementById('ed-ok').addEventListener('click', () => {
+    if (!editing) return;
+
+    if (editing.mode === 'valuebox') {
+      valueBoxes[editing.valueId].text = edValue.value.trim();
+      closeEditor();
+      render();
+      return;
+    }
+
+    const { pairId, side } = editing;
+    const kind = edKind.value;
+    const slot = pairs[pairId][side];
+
+    if (kind === 'value') {
+      const text = edValue.value.trim();
+      if (slot.kind === 'value' && slot.target) {
+        // already points to a value box — just update its text
+        valueBoxes[slot.target].text = text;
+      } else {
+        slot.kind = 'value';
+        slot.target = makeValueBox(text);
+      }
+    } else if (kind === 'nil') {
+      slot.kind = 'nil';
+      slot.target = undefined;
+    } else if (kind === 'cons') {
+      slot.kind = 'cons';
+      if (!slot.target || !pairs[slot.target]) {
+        slot.target = makePair();
+      }
+    }
+    closeEditor();
+    render();
+  });
+
+  edValue.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') document.getElementById('ed-ok').click();
+    if (e.key === 'Escape') document.getElementById('ed-cancel').click();
+  });
+
+  document.addEventListener('click', (e) => {
+    if (editor.style.display === 'block' &&
+        !editor.contains(e.target) &&
+        !e.target.classList.contains('hit-area') &&
+        !e.target.classList.contains('value-box')) {
+      closeEditor();
+    }
+  });
+
+  // ----- Toolbar actions -----
+  document.getElementById('btn-new').addEventListener('click', () => {
+    resetModel();
+    render();
+  });
+
+  document.getElementById('btn-clear').addEventListener('click', () => {
+    if (confirm('Clear the diagram and start over?')) {
+      resetModel();
+      render();
+    }
+  });
+
+  document.getElementById('btn-export').addEventListener('click', () => {
+    const clone = svg.cloneNode(true);
+    clone.setAttribute('xmlns', NS);
+    // inline minimal styles so the exported file looks right standalone
+    const styleTag = el('style', {});
+    styleTag.textContent = `
+      .cell-rect { fill:#fafaf8; stroke:#1a1a1a; stroke-width:1.6; }
+      .cell-divider { stroke:#1a1a1a; stroke-width:1.6; }
+      .nil-dash { stroke:#1a1a1a; stroke-width:1.4; }
+      .cell-text { font-family: monospace; font-size:14px; fill:#1a1a1a; text-anchor:middle; dominant-baseline:central; }
+      .ptr-dot { fill:#1a1a1a; }
+      .ptr-line { stroke:#1a1a1a; stroke-width:1.4; fill:none; }
+      .ptr-arrowhead { fill:#1a1a1a; }
+      .root-label { font-family: monospace; font-size:12px; fill:#77746c; }
+    `;
+    clone.insertBefore(styleTag, clone.firstChild);
+    const src = new XMLSerializer().serializeToString(clone);
+    const blob = new Blob([src], { type: 'image/svg+xml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'cons-diagram.svg';
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  render();
+})();
+</script>
+
+</body>
+</html>
