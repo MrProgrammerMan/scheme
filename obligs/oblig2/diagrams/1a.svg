@@ -1,0 +1,10 @@
+<svg id="diagram" xmlns="http://www.w3.org/2000/svg" width="300" height="238" viewBox="0 0 300 238"><style>
+      .cell-rect { fill:#fafaf8; stroke:#1a1a1a; stroke-width:1.6; }
+      .cell-divider { stroke:#1a1a1a; stroke-width:1.6; }
+      .nil-dash { stroke:#1a1a1a; stroke-width:1.4; }
+      .cell-text { font-family: monospace; font-size:14px; fill:#1a1a1a; text-anchor:middle; dominant-baseline:central; }
+      .ptr-dot { fill:#1a1a1a; }
+      .ptr-line { stroke:#1a1a1a; stroke-width:1.4; fill:none; }
+      .ptr-arrowhead { fill:#1a1a1a; }
+      .root-label { font-family: monospace; font-size:12px; fill:#77746c; }
+    </style><g class="edges"><circle cx="42" cy="66" r="3" class="ptr-dot"/><path d="M 42 66 L 42 158" class="ptr-line"/><polygon points="42,158 39.942607028924726,152.3637659592091 44.05738071838771,152.36376148662902" class="ptr-arrowhead"/><circle cx="86" cy="66" r="3" class="ptr-dot"/><path d="M 86 66 L 86 158" class="ptr-line"/><polygon points="86,158 83.94260702892473,152.3637659592091 88.05738071838772,152.36376148662902" class="ptr-arrowhead"/></g><g class="boxes"><rect x="20" y="44" width="88" height="44" class="cell-rect" rx="0"/><line x1="64" y1="44" x2="64" y2="88" class="cell-divider"/><rect x="20" y="44" width="44" height="44" fill="transparent" data-pair="p1" data-side="car" class="hit-area" style="cursor:pointer"/><circle cx="42" cy="66" r="3.2" class="ptr-dot"/><rect x="64" y="44" width="44" height="44" fill="transparent" data-pair="p1" data-side="cdr" class="hit-area" style="cursor:pointer"/><circle cx="86" cy="66" r="3.2" class="ptr-dot"/><rect x="20" y="158" width="44" height="44" class="cell-rect value-box" rx="0" data-value-id="v2" style="cursor:pointer"/><text x="42" y="180" class="cell-text">42</text><rect x="64" y="158" width="44" height="44" class="cell-rect value-box" rx="0" data-value-id="v3" style="cursor:pointer"/><text x="86" y="180" class="cell-text">11</text></g><text x="20" y="34" class="root-label">root</text></svg>

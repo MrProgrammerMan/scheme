@@ -7,6 +7,10 @@
     ];
 
     virtualPaths = [
+      {
+        dest = "diagrams";
+        src = ../diagrams;
+      }
       # Add paths that must be locally accessible to typst here
       # {
       #   dest = "icons";
