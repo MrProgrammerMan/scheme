@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>typst viewer</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0e0e0f;
+    --surface: #161618;
+    --border: #252528;
+    --accent: #e8c547;
+    --text: #b0b0b8;
+    --text-dim: #505058;
+    --mono: 'JetBrains Mono', monospace;
+    --bar-h: 38px;
+  }
+
+  html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 11px; overflow: hidden; }
+
+  #bar {
+    position: fixed; top: 0; left: 0; right: 0; height: var(--bar-h);
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; padding: 0 14px; gap: 12px; z-index: 100; user-select: none;
+  }
+
+  #dot {
+    width: 7px; height: 7px; border-radius: 50%; background: var(--text-dim); flex-shrink: 0;
+    transition: background 0.3s, box-shadow 0.3s;
+  }
+  #dot.live  { background: #4caf7d; box-shadow: 0 0 6px #4caf7d88; }
+  #dot.flash { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+  #dot.error { background: #e05555; box-shadow: 0 0 6px #e0555588; }
+
+  #label { color: var(--text-dim); letter-spacing: 0.08em; font-size: 10px; text-transform: uppercase; }
+  #file-path { color: var(--text); font-size: 11px; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #status { font-size: 10px; color: var(--text-dim); letter-spacing: 0.06em; min-width: 80px; text-align: right; transition: color 0.3s; }
+  #status.updated { color: var(--accent); }
+
+  #viewer {
+    position: fixed; top: var(--bar-h); left: 0; right: 0; bottom: 0;
+    overflow-y: auto; overflow-x: auto; scroll-behavior: auto; background: var(--bg);
+  }
+
+  #pdf-container {
+    display: flex; flex-direction: column; align-items: center;
+    padding: 28px 0 48px; gap: 18px; min-height: 100%;
+  }
+
+  .page-wrap { box-shadow: 0 4px 32px #00000066; border: 1px solid var(--border); }
+  .page-wrap canvas { display: block; }
+
+  #zoom-controls {
+    position: fixed; bottom: 18px; right: 18px;
+    display: flex; flex-direction: column; gap: 4px; z-index: 100;
+  }
+  .zoom-btn {
+    width: 30px; height: 30px; background: var(--surface); border: 1px solid var(--border);
+    color: var(--text); font-family: var(--mono); font-size: 15px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: border-color 0.2s, color 0.2s; line-height: 1;
+  }
+  .zoom-btn:hover { border-color: var(--accent); color: var(--accent); }
+  #zoom-level {
+    background: var(--surface); border: 1px solid var(--border); color: var(--text-dim);
+    font-family: var(--mono); font-size: 9px; text-align: center; padding: 3px 0; letter-spacing: 0.05em;
+  }
+
+  @keyframes fadein { from { opacity: 0.4 } to { opacity: 1 } }
+  .page-wrap.fresh { animation: fadein 0.25s ease; }
+</style>
+</head>
+<body>
+
+<div id="bar">
+  <div id="dot"></div>
+  <span id="label">typst</span>
+  <span id="file-path">main.pdf</span>
+  <span id="status">loading…</span>
+</div>
+
+<div id="viewer">
+  <div id="pdf-container"></div>
+</div>
+
+<div id="zoom-controls">
+  <button class="zoom-btn" onclick="adjustZoom(0.15)">+</button>
+  <div id="zoom-level">125%</div>
+  <button class="zoom-btn" onclick="adjustZoom(-0.15)">−</button>
+  <button class="zoom-btn" onclick="fitWidth()" title="fit width">&#x229F;</button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+const PDF_URL = 'main.pdf';
+const POLL_MS = 400;
+
+let scale = 1.25;
+let currentPdf = null;
+let rendering = false;
+let pendingReload = false;
+let lastFingerprint = null;
+
+const viewer    = document.getElementById('viewer');
+const container = document.getElementById('pdf-container');
+const dot       = document.getElementById('dot');
+const statusEl  = document.getElementById('status');
+const zoomLbl   = document.getElementById('zoom-level');
+
+async function fetchPdf() {
+  const res = await fetch(PDF_URL + '?_=' + Date.now());
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const bytes = await res.arrayBuffer();
+  const fingerprint = quickHash(bytes);
+  return { bytes, fingerprint };
+}
+
+function quickHash(buf) {
+  const a = new Uint8Array(buf);
+  let h = 0;
+  const step = Math.max(1, Math.floor(a.length / 512));
+  for (let i = 0; i < a.length; i += step) h = (Math.imul(31, h) + a[i]) | 0;
+  return h + ':' + a.length;
+}
+
+async function loadAndRender(resetScroll) {
+  if (rendering) { pendingReload = true; return; }
+  rendering = true;
+
+  const scrollRatio = resetScroll ? 0
+    : viewer.scrollTop / ((viewer.scrollHeight - viewer.clientHeight) || 1);
+
+  try {
+    const { bytes, fingerprint } = await fetchPdf();
+    lastFingerprint = fingerprint;
+
+    const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
+    currentPdf = pdf;
+
+    const fragments = [];
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page     = await pdf.getPage(i);
+      const viewport = page.getViewport({ scale });
+      const canvas   = document.createElement('canvas');
+      canvas.width   = viewport.width;
+      canvas.height  = viewport.height;
+      await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+      const wrap = document.createElement('div');
+      wrap.className = 'page-wrap fresh';
+      wrap.appendChild(canvas);
+      fragments.push(wrap);
+    }
+
+    container.innerHTML = '';
+    fragments.forEach(f => container.appendChild(f));
+
+    requestAnimationFrame(() => {
+      viewer.scrollTop = resetScroll ? 0
+        : scrollRatio * (viewer.scrollHeight - viewer.clientHeight);
+    });
+
+    dot.className = 'flash';
+    statusEl.textContent = 'updated';
+    statusEl.className = 'updated';
+    setTimeout(() => { dot.className = 'live'; statusEl.textContent = 'watching'; statusEl.className = ''; }, 1000);
+
+  } catch (e) {
+    dot.className = 'error';
+    statusEl.textContent = 'error — is main.pdf here?';
+    statusEl.className = '';
+    console.error(e);
+  }
+
+  rendering = false;
+  if (pendingReload) { pendingReload = false; loadAndRender(false); }
+}
+
+async function poll() {
+  try {
+    const { fingerprint } = await fetchPdf();
+    if (fingerprint !== lastFingerprint) await loadAndRender(false);
+  } catch (_) {}
+}
+
+function adjustZoom(delta) {
+  scale = Math.max(0.3, Math.min(4, scale + delta));
+  zoomLbl.textContent = Math.round(scale * 100) + '%';
+  if (currentPdf) loadAndRender(false);
+}
+
+function fitWidth() {
+  if (!currentPdf) return;
+  currentPdf.getPage(1).then(page => {
+    const vp = page.getViewport({ scale: 1 });
+    scale = (viewer.clientWidth - 56) / vp.width;
+    zoomLbl.textContent = Math.round(scale * 100) + '%';
+    loadAndRender(false);
+  });
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === '=' || e.key === '+') adjustZoom(0.15);
+  if (e.key === '-') adjustZoom(-0.15);
+  if (e.key === '0') fitWidth();
+});
+
+(async () => {
+  await loadAndRender(true);
+  setInterval(poll, POLL_MS);
+})();
+</script>
+</body>
+</html>
