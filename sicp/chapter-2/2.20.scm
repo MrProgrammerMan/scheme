@@ -1,0 +1,13 @@
+(define (same-parity x . nums)
+  (define (same? a)
+    (if (odd? x)
+        (odd? a)
+        (even? a)))
+  (define (collect l)
+    (cond ((null? l) '())
+          ((same? (car l)) (cons (car l) (collect (cdr l))))
+          (else (collect (cdr l)))))
+  (cons x (collect nums)))
+
+(same-parity 1 2 3 4 5 6 7)
+(same-parity 2 3 4 5 6 7)
