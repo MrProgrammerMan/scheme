@@ -1,0 +1,27 @@
+(define (make-monitored f)
+  (let ((count 0))
+    (lambda (x)
+      (cond
+        ((eq? x 'how-many-calls?) count)
+        ((eq? x 'reset-count) (set! count 0))
+        (else (begin
+                (set! count (+ count 1))
+                (f x)))))))
+
+(define ms (make-monitored sqrt))
+
+(ms 4)
+(ms 3)
+(display "Number of calls: ")
+(ms 'how-many-calls?)
+(ms 16)
+(display "Number of calls: ")
+(ms 'how-many-calls?)
+(ms 'reset-count)
+(display "Count reset")
+(newline)
+(display "Number of calls: ")
+(ms 'how-many-calls?)
+(ms 25)
+(display "Number of calls: ")
+(ms 'how-many-calls?)
