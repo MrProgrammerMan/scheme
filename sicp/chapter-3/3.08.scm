@@ -1,16 +1,17 @@
 #lang sicp
 
 (define f
-  (let ((state 0))
+  (let ((trigger 1) (out 0))
     (lambda (x)
-      (if (= state x)
-          (begin
-            (set! state 100)
-            state)
-          state))))
+      (if (= trigger x)
+          (let ((old out))
+            (begin
+              (set! out 1)
+              old))
+          0))))
 
-;; 1.00
-(+ (f 1) (f 0))
-
-;; 200
+;; 0
 (+ (f 0) (f 1))
+
+;; 1
+(+ (f 1) (f 0))
