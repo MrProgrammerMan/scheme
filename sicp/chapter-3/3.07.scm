@@ -1,0 +1,35 @@
+#lang sicp
+
+(define (make-account balance password)
+  (define (withdraw amount)
+    (if (>= balance amount)
+        (begin
+          (set! balance (- balance amount))
+          balance)
+        "Insufficient funds"))
+  (define (deposit amount)
+    (begin
+      (set! balance (+ balance amount))
+      balance))
+  (define (dispatch op)
+    (cond ((eq? op 'deposit) deposit)
+          ((eq? op 'withdraw) withdraw)
+          ((eq? op 'access) 'granted)
+          (else (error "Unsupported operation" op))))
+  (lambda (password-in arg)
+    (if (eq? password password-in)
+        (dispatch arg)
+        'denied)))
+
+(define (make-joint acc passwd snd-passwd)
+  (if (eq? (acc passwd 'access) 'granted)
+      (lambda (password-in arg)
+        (if (eq? snd-passwd password-in)
+            (acc passwd arg)
+            'denied))
+      'denied))
+
+(define peter-acc (make-account 100 'open-sesame))
+(define paul-acc (make-joint peter-acc 'open-sesame 'rosebud))
+((paul-acc 'rosebud 'withdraw) 20)
+((peter-acc 'open-sesame 'withdraw) 25)
