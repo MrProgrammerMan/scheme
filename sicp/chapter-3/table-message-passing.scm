@@ -82,68 +82,104 @@
 
   (print-node node 0))
 
-(define t (make-table))
-(print-table t)
 
-; 1. Empty table: root has no value, any path is missing
-(get t '())              ; => #f
-(get t '(a))             ; => #f
-
-; 2. Single-level insert and lookup
-(put! t '(a) 1 )
-(get t '(a))             ; => 1
-
-; 3. Multi-level insert (creates intermediate nodes)
-(put! t '(a b c) 42)
-(get t '(a b c))         ; => 42
-(get t '(a b))           ; => #f   (intermediate node, no value)
-(get t '(a))             ; => 1    (unchanged)
-
-; 4. Sibling keys under the same parent
-(put! t '(a x) 'ex)
-(put! t '(a y) 'why)
-(get t '(a x))           ; => ex
-(get t '(a y))           ; => why
-(get t '(a b c))         ; => 42   (still there)
-
-; 5. Overwrite an existing value
-(put! t '(a) 100)
-(get t '(a))             ; => 100
-
-; 6. Missing paths
-(get t '(z))             ; => #f
-(get t '(a b c d))       ; => #f
-(get t '(a q))           ; => #f
-(get t '(z y))           ; => #f   (z missing, y remaining)
-(get t '(z y x))         ; => #f   (several keys remaining after the miss)
-(get t '(a q r))         ; => #f   (a exists, q missing, r remaining)
-(get t '(a b c d e))     ; => #f   (miss at d, e remaining)
-(get t '(a b q c))       ; => #f   (miss after two successful steps)
-
-; 7. Root value via empty key list
-(put! t '() 'root)
-(get t '())              ; => root
-
-; 8. Separate tables don't share state
-(define t2 (make-table))
-(put! t2 '(a) 'other)
-(get t2 '(a))            ; => other
-(get t '(a))             ; => 100
-
-; 9. Mixed key paths in a fresh table
-(define t3 (make-table))
-(put! t3 '(math +) 43)
-(put! t3 '(math -) 45)
-(put! t3 '(letters a) 97)
-(get t3 '(math +))       ; => 43
-(get t3 '(letters a))    ; => 97
-
-; 10. Pretty-printing
-(print-table t3)
-; Children are consed on the front, so most recent first:
-; *table*
-;   letters
-;     a = 97
-;   math
-;     - = 45
-;     + = 43
+;;; ------------------------------------------------------------
+;;; Tests
+;;; ------------------------------------------------------------
+;;; Each section builds its own fresh table, so sections are
+;;; independent. Failures print FAIL with expected/actual; passes
+;;; are silent except for the final tally.
+ 
+(define tests-run 0)
+(define tests-failed 0)
+ 
+(define (check description expected actual)
+  (set! tests-run (+ tests-run 1))
+  (if (not (equal? expected actual))
+      (begin
+        (set! tests-failed (+ tests-failed 1))
+        (display "FAIL: ") (display description)
+        (display " | expected ") (display expected)
+        (display ", got ") (display actual)
+        (newline))))
+ 
+;; Empty table
+(let ((t (make-table)))
+  (check "empty table, root"       #f (get t '()))
+  (check "empty table, any path"   #f (get t '(a))))
+ 
+;; Single-level insert, then overwrite
+(let ((t (make-table)))
+  (put! t '(a) 1)
+  (check "single-level insert"     1   (get t '(a)))
+  (put! t '(a) 100)
+  (check "overwrite"               100 (get t '(a))))
+ 
+;; Multi-level insert creates valueless intermediate nodes
+(let ((t (make-table)))
+  (put! t '(a) 1)
+  (put! t '(a b c) 42)
+  (check "deep insert"             42  (get t '(a b c)))
+  (check "intermediate has no value" #f (get t '(a b)))
+  (check "existing value untouched"  1  (get t '(a))))
+ 
+;; Siblings under the same parent don't interfere
+(let ((t (make-table)))
+  (put! t '(a b c) 42)
+  (put! t '(a x) 'ex)
+  (put! t '(a y) 'why)
+  (check "sibling x"               'ex  (get t '(a x)))
+  (check "sibling y"               'why (get t '(a y)))
+  (check "earlier branch intact"   42   (get t '(a b c))))
+ 
+;; Missing paths return #f, wherever the miss happens
+(let ((t (make-table)))
+  (put! t '(a b c) 42)
+  (check "miss at first key"       #f (get t '(z)))
+  (check "miss with keys left"     #f (get t '(z y x)))
+  (check "miss at second key"      #f (get t '(a q)))
+  (check "miss mid-path"           #f (get t '(a q r)))
+  (check "miss after two hits"     #f (get t '(a b q c)))
+  (check "path longer than table"  #f (get t '(a b c d e))))
+ 
+;; Root value via the empty key list
+(let ((t (make-table)))
+  (put! t '() 'root)
+  (check "root value"              'root (get t '())))
+ 
+;; Separate tables don't share state
+(let ((t1 (make-table))
+      (t2 (make-table)))
+  (put! t1 '(a) 'one)
+  (put! t2 '(a) 'two)
+  (check "table 1 isolated"        'one (get t1 '(a)))
+  (check "table 2 isolated"        'two (get t2 '(a))))
+ 
+;; Keys can be any symbols, including operators
+(let ((t (make-table)))
+  (put! t '(math +) 43)
+  (put! t '(math -) 45)
+  (put! t '(letters a) 97)
+  (check "operator key +"          43 (get t '(math +)))
+  (check "operator key -"          45 (get t '(math -)))
+  (check "letters a"               97 (get t '(letters a))))
+ 
+;; Summary
+(display tests-run) (display " checks, ")
+(display tests-failed) (display " failed")
+(newline)
+ 
+;; Pretty-printing (visual check; children are consed on the front,
+;; so the most recently added appear first). Expected output:
+;;
+;; *table*
+;;   letters
+;;     a = 97
+;;   math
+;;     - = 45
+;;     + = 43
+(let ((t (make-table)))
+  (put! t '(math +) 43)
+  (put! t '(math -) 45)
+  (put! t '(letters a) 97)
+  (print-table t))
