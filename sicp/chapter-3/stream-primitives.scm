@@ -1,4 +1,6 @@
-#lang sicp
+#lang racket
+
+(require sicp)
 
 (define (stream-car stream) (car stream))
 (define (stream-cdr stream) (force (cdr stream)))
@@ -49,3 +51,5 @@
        (apply proc (map stream-car argstreams))
        (apply stream-map
               (cons proc (map stream-cdr argstreams))))))
+
+(provide primes take stream-car stream-cdr stream-map stream-for-each stream-filter display-stream integers)
