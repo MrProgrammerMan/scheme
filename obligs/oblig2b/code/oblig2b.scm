@@ -68,3 +68,31 @@
 (stack s1)
 (push! s1 'foo 'faa)
 (stack s1)
+
+
+;; 3.
+;;    c.
+(newline)
+(display "3c.")
+(newline)
+
+(define (cycle? l)
+  ;; "Floyd's tortoise and hare":
+  (define (race slow fast)
+    (cond ((or (null? fast) (null? (cdr fast))) #f) ; Ingen syklus hvis listen tar slutt
+          ((eq? slow fast) #t) ; Pekerne møtes
+          (else (race (cdr slow) (cddr fast)))))
+  (if (null? l)
+      #f
+      (race l (cdr l))))
+
+;; Test-kall:
+(define bar (list 'a 'b 'c 'd 'e))
+(set-cdr! (cdddr bar) (cdr bar))
+(define bah (list 'bring 'a 'towel))
+(set-car! bah (cdr bah))
+(set-car! (car bah) 42)
+(cycle? '(hey ho))
+(cycle? '(la la la))
+(cycle? bah)
+(cycle? bar)
