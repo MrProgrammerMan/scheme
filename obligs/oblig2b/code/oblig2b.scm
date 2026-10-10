@@ -53,3 +53,18 @@
 (s1 'push! 'bah)
 (s1 'push! 'zap 'zip 'baz)
 (s1 'stack)
+
+;;    b.
+(newline)
+(display "2b.")
+(newline)
+
+(define (pop! s) (s 'pop!))
+(define (stack s) (s 'stack))
+(define (push! s . items) (apply s (cons 'push! items)))
+
+;; Test-kall:
+(pop! s1)
+(stack s1)
+(push! s1 'foo 'faa)
+(stack s1)
