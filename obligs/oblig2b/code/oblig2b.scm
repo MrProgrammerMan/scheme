@@ -79,7 +79,7 @@
 (define (cycle? l)
   ;; "Floyd's tortoise and hare":
   (define (race slow fast)
-    (cond ((or (null? fast) (null? (cdr fast))) #f) ; Ingen syklus hvis listen tar slutt
+    (cond ((or (null? fast) (null? (cdr fast))) #f) ;; Nil i listen?
           ((eq? slow fast) #t) ; Pekerne møtes
           (else (race (cdr slow) (cddr fast)))))
   (if (null? l)
