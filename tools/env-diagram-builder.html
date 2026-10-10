@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Environment Diagram Builder</title>
+<style>
+:root{--ink:#1a1a1a;--paper:#fafaf8;--line:#d8d6d0;--accent:#b5432f;--mono:'JetBrains Mono','SF Mono',Consolas,monospace;--serif:'Iowan Old Style','Palatino Linotype',Georgia,serif}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--paper);color:var(--ink);font-family:var(--serif)}
+body{display:flex;flex-direction:column}
+header{padding:14px 24px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:18px;flex-wrap:wrap}
+h1{font-size:17px;margin:0}
+.sub{font-size:13px;color:#77746c;font-family:var(--mono)}
+.toolbar{margin-left:auto;display:flex;gap:8px}
+button{font-family:var(--mono);font-size:12px;background:transparent;border:1px solid var(--line);color:var(--ink);padding:7px 12px;cursor:pointer;border-radius:3px}
+button:hover{border-color:var(--ink)}
+button.danger:hover{border-color:var(--accent);color:var(--accent)}
+button.primary{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+main{flex:1;display:flex;min-height:0}
+#wrap{flex:1;overflow:auto;background:#fff}
+svg#d{display:block;touch-action:none}
+aside{width:290px;border-left:1px solid var(--line);padding:16px;overflow:auto;font-family:var(--mono);font-size:12.5px}
+aside h2{font-size:13px;margin:0 0 12px;text-transform:uppercase;letter-spacing:.6px;color:#77746c}
+aside label{display:block;margin:10px 0 4px;color:#77746c;font-size:11.5px}
+aside input,aside select,aside textarea{width:100%;font-family:var(--mono);font-size:13px;padding:6px 7px;border:1px solid var(--line);border-radius:3px;background:#fff}
+aside textarea{resize:vertical;min-height:70px;white-space:pre;overflow:auto}
+aside .row{display:flex;gap:6px;margin-top:12px;flex-wrap:wrap}
+aside .blist button{display:block;width:100%;text-align:left;margin-top:5px}
+.hint{color:#999;line-height:1.5}
+footer{border-top:1px solid var(--line);padding:7px 24px;font-family:var(--mono);font-size:11.5px;color:#999}
+</style>
+</head>
+<body>
+<header>
+  <h1>Environment Diagrams</h1><div class="sub">SICP-style environment model builder</div>
+  <div class="toolbar">
+    <button class="primary" id="add">+ frame</button>
+    <button id="exp">export svg</button>
+    <button class="danger" id="clr">clear</button>
+  </div>
+</header>
+<main>
+  <div id="wrap"><svg id="d" xmlns="http://www.w3.org/2000/svg" width="3000" height="2000"></svg></div>
+  <aside id="panel"></aside>
+</main>
+<footer>drag frames, name labels, OO symbols and procedure bodies to arrange them &middot; click to edit &middot; autosaved in this browser</footer>
+
+<script>
+(function(){
+"use strict";
+const S='#1a1a1a',A='#b5432f',FT='font-family="Menlo,Consolas,monospace" font-size="14"',CW=8.4,ROW=26;
+const svg=document.getElementById('d'),P=document.getElementById('panel');
+let st={frames:[],n:1},sel=null,G={},OP={},XV={},PV={};
+try{const s=localStorage.getItem('envd2');if(s)st=JSON.parse(s)}catch(e){}
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const frame=id=>st.frames.find(f=>f.id==id);
+const fl=f=>f.name||'(unnamed frame '+f.num+')';
+const cur=()=>sel&&frame(sel.f)||null;
+const clamp=(v,a,b)=>Math.min(Math.max(v,a),b);
+const bw=b=>b.body?Math.max(...b.body.split('\n').map(l=>l.length))*CW+10:0;
+
+// Arrow made of horizontal/vertical segments; head on the last one.
+function poly(pts){
+  pts=pts.filter((p,i)=>!i||p[0]!=pts[i-1][0]||p[1]!=pts[i-1][1]);
+  const n=pts.length;if(n<2)return'';
+  const [x1,y1]=pts[n-2],[x2,y2]=pts[n-1],a=Math.atan2(y2-y1,x2-x1),L=10;
+  const q=d=>`${x2-L*Math.cos(a+d)},${y2-L*Math.sin(a+d)}`;
+  const body=pts.slice(0,-1).concat([[x2-(L-2)*Math.cos(a),y2-(L-2)*Math.sin(a)]]);
+  return `<polyline points="${body.map(p=>p.join(',')).join(' ')}" fill="none" stroke="${S}" stroke-width="1.5" stroke-linejoin="round" pointer-events="none"/><polygon points="${x2},${y2} ${q(.4)} ${q(-.4)}" fill="${S}"/>`;
+}
+function text(x,y,lines,anchor,extra){
+  return `<text ${FT} fill="${S}" text-anchor="${anchor||'start'}" xml:space="preserve" style="white-space:pre" pointer-events="none" ${extra||''}>`+
+    lines.map((l,i)=>`<tspan x="${x}" y="${y+i*17}">${esc(l)||' '}</tspan>`).join('')+'</text>';
+}
+
+// ---- layout: frame sizes, procedure symbol positions, arrow x-positions ----
+function layout(){
+  G={};OP={};XV={};PV={};
+  st.frames.forEach(f=>{
+    const lines=f.b.map(b=>b.type=='proc'?b.name+':':b.name+': '+b.value);
+    const tw=Math.max(0,...lines.map(l=>l.length))*CW;
+    G[f.id]={x:f.x,y:f.y,h:Math.max(50,f.b.length*ROW+20),tw,lines,w:Math.max(95,tw+36)};
+  });
+  // default OO spots: below the frame, first procedure farthest right so arrows don't cross
+  st.frames.forEach(f=>{
+    const g=G[f.id],pr=f.b.filter(b=>b.type=='proc'),m=pr.length;
+    const nh=f.note?f.note.split('\n').length*17+16:0;
+    let x=g.x+g.tw+40;
+    for(let j=m-1;j>=0;j--){
+      if(j<m-1)x+=Math.max(70,bw(pr[j+1])+16);
+      const b=pr[j];
+      OP[b.id]=b.dx==null?[x,g.y+g.h+nh+50]:[f.x+b.dx,f.y+b.dy];
+    }
+  });
+  // widen frames so every incoming arrow can arrive vertically
+  const need=(id,x)=>{const g=G[id];if(g)g.w=Math.max(g.w,x-g.x)};
+  st.frames.forEach(f=>f.b.forEach(b=>{
+    if(b.type!='proc')return;
+    const e=frame(b.env)||f,xv=Math.max(OP[b.id][0]+36,e.x+14);
+    XV[b.id]=xv;need(e.id,xv+14);
+  }));
+  const cnt={};
+  st.frames.forEach(f=>{
+    const p=f.parent&&frame(f.parent);if(!p||p===f)return;
+    const k=cnt[p.id]||0;cnt[p.id]=k+1;
+    const xv=Math.max(f.x,p.x)+20+k*14;
+    PV[f.id]=xv;need(f.id,xv+20);need(p.id,xv+20);
+  });
+}
+function labelRoute(lr,g){
+  const cx=lr.x+lr.w/2,cy=lr.y+lr.h/2,xt=clamp(cx,g.x+12,g.x+g.w-12);
+  if(cy>g.y+6&&cy<g.y+g.h-6){const r=cx<g.x;return [[r?lr.x+lr.w:lr.x,cy],[r?g.x:g.x+g.w,cy]]}
+  const down=cy<g.y;
+  if(xt>=lr.x&&xt<=lr.x+lr.w)return [[xt,down?lr.y+lr.h:lr.y],[xt,down?g.y:g.y+g.h]];
+  const right=xt>lr.x+lr.w;
+  return [[right?lr.x+lr.w:lr.x,cy],[xt,cy],[xt,down?g.y:g.y+g.h]];
+}
+
+function render(exp){
+  layout();
+  let e='',b='',t='';
+  st.frames.forEach(f=>{
+    const g=G[f.id],fsel=!exp&&sel&&sel.f==f.id&&!sel.b;
+    if(f.name){
+      const lw=f.name.length*CW+12,lr={x:f.x+f.lx,y:f.y+f.ly,w:lw,h:22};
+      e+=poly(labelRoute(lr,g));
+      b+=`<rect x="${lr.x}" y="${lr.y}" width="${lw}" height="22" fill="transparent" data-drag="label" data-f="${f.id}" style="cursor:move"/>`+text(lr.x+6,lr.y+11,[f.name],'start','dominant-baseline="central"');
+    }
+    const p=PV[f.id]!=null&&frame(f.parent);
+    if(p){const c=g,pg=G[p.id],xv=PV[f.id];
+      e+=poly(c.y>pg.y?[[xv,c.y],[xv,pg.y+pg.h]]:[[xv,c.y+c.h],[xv,pg.y]]);}
+    b+=`<rect x="${g.x}" y="${g.y}" width="${g.w}" height="${g.h}" fill="#fff" stroke="${fsel?A:S}" stroke-width="${fsel?2.4:1.6}" data-drag="frame" data-f="${f.id}" style="cursor:move"/>`;
+    f.b.forEach((bd,i)=>{
+      const rc=g.y+23+i*ROW,bs=!exp&&sel&&sel.b==bd.id;
+      if(!exp)b+=`<rect x="${g.x+2}" y="${rc-13}" width="${g.w-4}" height="${ROW}" fill="${bs?'#f3e3df':'transparent'}" data-drag="frame" data-sel="bind" data-f="${f.id}" data-b="${bd.id}" style="cursor:pointer"/>`;
+      b+=text(g.x+12,rc,[g.lines[i]],'start','dominant-baseline="central"');
+      if(bd.type!='proc')return;
+      const L=OP[bd.id],R=[L[0]+22,L[1]],col=bs?A:S;
+      // binding -> OO: starts right after the colon
+      const sx=g.x+12+(bd.name.length+1)*CW+6,dy=L[1]-rc;
+      t+=Math.abs(dy)<16?poly([[sx,rc],[L[0]-11,rc]]):poly([[sx,rc],[L[0]+11,rc],[L[0]+11,dy>0?L[1]-11:L[1]+11]]);
+      t+=`<circle cx="${sx}" cy="${rc}" r="2.6" fill="${S}" pointer-events="none"/>`;
+      // left O -> body
+      if(bd.body){
+        const bl=bd.body.split('\n'),bb={x:L[0]+bd.bx,y:L[1]+bd.by,w:bw(bd),h:bl.length*17+8};
+        if(L[1]>=bb.y&&L[1]<=bb.y+bb.h)e+=poly([L,[L[0]>bb.x+bb.w?bb.x+bb.w:bb.x,L[1]]]);
+        else{const xt=clamp(L[0],bb.x+6,bb.x+bb.w-6);e+=poly([L,[xt,L[1]],[xt,L[1]<bb.y?bb.y:bb.y+bb.h]])}
+        b+=(exp?'':`<rect x="${bb.x}" y="${bb.y}" width="${bb.w}" height="${bb.h}" fill="transparent" data-drag="body" data-sel="bind" data-f="${f.id}" data-b="${bd.id}" style="cursor:move"/>`)+text(bb.x+5,bb.y+14,bl);
+      }
+      // right O -> environment: a little right, then straight vertical
+      const tg=G[bd.env]||g,xv=XV[bd.id];
+      e+=poly([R,[xv,R[1]],[xv,R[1]>tg.y+tg.h/2?tg.y+tg.h:tg.y]]);
+      [L,R].forEach(c=>{b+=`<circle cx="${c[0]}" cy="${c[1]}" r="11" fill="#fff" stroke="${col}" stroke-width="1.6" data-drag="proc" data-sel="bind" data-f="${f.id}" data-b="${bd.id}" style="cursor:move"/><circle cx="${c[0]}" cy="${c[1]}" r="2.6" fill="${S}" pointer-events="none"/>`});
+    });
+    if(f.note)b+=text(g.x,g.y+g.h+20,f.note.split('\n'));
+  });
+  svg.innerHTML=`<g id="c">${e}${b}${t}</g>`;
+  try{localStorage.setItem('envd2',JSON.stringify(st))}catch(x){}
+}
+
+// ---- dragging ----
+let drag=null;
+svg.onpointerdown=ev=>{
+  const t=ev.target.closest('[data-drag]');
+  if(!t){sel=null;render();panel();return}
+  const f=frame(t.dataset.f),b=t.dataset.b?f.b.find(x=>x.id==t.dataset.b):null,k=t.dataset.drag;
+  const o=k=='frame'?[f.x,f.y]:k=='label'?[f.lx,f.ly]:k=='proc'?[OP[b.id][0]-f.x,OP[b.id][1]-f.y]:[b.bx,b.by];
+  drag={k,f,b,o,x:ev.clientX,y:ev.clientY,moved:false,bind:t.dataset.sel=='bind'};
+  svg.setPointerCapture(ev.pointerId);
+};
+svg.onpointermove=ev=>{
+  if(!drag)return;
+  const dx=ev.clientX-drag.x,dy=ev.clientY-drag.y;
+  if(!drag.moved&&Math.hypot(dx,dy)<4)return;
+  drag.moved=true;
+  const{k,f,b,o}=drag,X=o[0]+dx,Y=o[1]+dy;
+  if(k=='frame'){f.x=X;f.y=Y}else if(k=='label'){f.lx=X;f.ly=Y}else if(k=='proc'){b.dx=X;b.dy=Y}else{b.bx=X;b.by=Y}
+  render();
+};
+svg.onpointerup=()=>{
+  if(drag&&!drag.moved){sel={f:drag.f.id,b:drag.bind?drag.b.id:null};render();panel()}
+  drag=null;
+};
+
+// ---- side panel ----
+function panel(){
+  const f=cur();
+  if(!f){P.innerHTML='<p class="hint">Add a frame with “+ frame”, then click it to set its name, parent and bindings.<br><br>Everything on the canvas can be dragged. Frames widen automatically so arrows can enter them vertically.</p>';return}
+  const b=sel.b&&f.b.find(x=>x.id==sel.b);
+  const fo=(skip,val)=>st.frames.filter(x=>x.id!=skip).map(x=>`<option value="${x.id}" ${x.id==val?'selected':''}>${esc(fl(x))}</option>`).join('');
+  if(!b){
+    P.innerHTML=`<h2>Frame</h2>
+    <label>Environment name (shown outside the frame)</label><input data-k="name" value="${esc(f.name)}" placeholder="e.g. Global environment, E1">
+    <label>Parent frame</label><select data-k="parent"><option value="">(none: global)</option>${fo(f.id,f.parent)}</select>
+    <label>Text under frame (expression evaluated)</label><textarea data-k="note" placeholder="(+ 5 3)">${esc(f.note)}</textarea>
+    <label>Bindings</label><div class="blist">${f.b.map(x=>`<button data-act="selb" data-b="${x.id}">${esc(x.name)} : ${x.type=='proc'?'procedure':'value'}</button>`).join('')}</div>
+    <div class="row"><button class="primary" data-act="addb">+ add binding</button><button class="danger" data-act="delf">delete frame</button></div>`;
+  }else{
+    P.innerHTML=`<h2>Binding in ${esc(fl(f))}</h2>
+    <label>Name</label><input data-k="name" value="${esc(b.name)}">
+    <label>Type</label><select data-k="type"><option value="value" ${b.type=='value'?'selected':''}>value</option><option value="proc" ${b.type=='proc'?'selected':''}>procedure</option></select>
+    ${b.type=='value'?`<label>Value</label><input data-k="value" value="${esc(b.value)}">`:
+    `<label>Procedure body (line breaks and indentation kept)</label><textarea data-k="body" spellcheck="false" rows="7">${esc(b.body)}</textarea>
+     <label>Environment pointer</label><select data-k="env">${fo(-1,b.env)}</select>
+     <div class="row"><button data-act="auto">reset OO position</button></div>`}
+    <div class="row"><button data-act="back">&larr; frame</button><button class="danger" data-act="delb">delete binding</button></div>`;
+  }
+}
+P.oninput=ev=>{
+  const k=ev.target.dataset.k,f=cur();if(!k||!f)return;
+  const b=sel.b&&f.b.find(x=>x.id==sel.b),o=b||f;
+  o[k]=ev.target.value;
+  if(k=='type')panel();
+  render();
+};
+P.onkeydown=ev=>{
+  if(ev.key=='Tab'&&ev.target.tagName=='TEXTAREA'){
+    ev.preventDefault();ev.target.setRangeText('  ',ev.target.selectionStart,ev.target.selectionEnd,'end');
+    ev.target.dispatchEvent(new Event('input',{bubbles:true}));
+  }
+};
+P.onclick=ev=>{
+  const a=ev.target.closest('[data-act]'),f=cur();if(!a||!f)return;
+  const act=a.dataset.act;
+  if(act=='addb'){
+    const bd={id:'b'+st.n++,name:'x',type:'value',value:'',body:'',env:f.id,dx:null,dy:null,bx:-11,by:50};
+    f.b.push(bd);sel.b=bd.id;
+  }else if(act=='selb')sel.b=a.dataset.b;
+  else if(act=='back')sel.b=null;
+  else if(act=='auto'){const b=f.b.find(x=>x.id==sel.b);b.dx=b.dy=null;b.bx=-11;b.by=50}
+  else if(act=='delb'){f.b=f.b.filter(x=>x.id!=sel.b);sel.b=null}
+  else if(act=='delf'){
+    st.frames=st.frames.filter(x=>x!=f);
+    st.frames.forEach(x=>{if(x.parent==f.id)x.parent=null;x.b.forEach(y=>{if(y.env==f.id)y.env=x.id})});
+    sel=null;
+  }
+  panel();render();
+  if(act=='addb'||act=='selb'){const i=P.querySelector('input');if(i)i.select()}
+};
+
+// ---- toolbar ----
+document.getElementById('add').onclick=()=>{
+  const k=st.frames.length,num=st.n++;
+  const f={id:'f'+num,num,x:60+(k*40)%400,y:90+(k*40)%300,name:'',parent:null,note:'',lx:0,ly:-38,b:[]};
+  st.frames.push(f);sel={f:f.id,b:null};render();panel();
+  const i=P.querySelector('input');if(i)i.focus();
+};
+document.getElementById('clr').onclick=()=>{
+  if(confirm('Clear the whole diagram?')){st={frames:[],n:1};sel=null;render();panel()}
+};
+document.getElementById('exp').onclick=()=>{
+  if(!st.frames.length)return;
+  render(true);
+  const c=document.getElementById('c'),bb=c.getBBox(),p=24,x=bb.x-p,y=bb.y-p,w=bb.width+2*p,h=bb.height+2*p;
+  const body=new XMLSerializer().serializeToString(c);
+  const src=`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="${x} ${y} ${w} ${h}"><rect x="${x}" y="${y}" width="${w}" height="${h}" fill="#fff"/>${body}</svg>`;
+  render();
+  const u=URL.createObjectURL(new Blob([src],{type:'image/svg+xml'})),a=document.createElement('a');
+  a.href=u;a.download='environment-diagram.svg';a.click();URL.revokeObjectURL(u);
+};
+
+render();panel();
+})();
+</script>
+</body>
+</html>
