@@ -2,6 +2,9 @@
 #set text(size: 11pt)
 #set text(lang: "nb")
 
+#show link: set text(fill: blue)
+#show link: underline
+
 #align(center + horizon)[
   #text(2em, weight: "bold")[IN2040 - oblig 2b]
   #v(10pt)
@@ -50,8 +53,6 @@ Dette dokumentet inneholder svar på tegne-oppgavene i oblig 2b. Jeg har også v
 ]
 
 #block(width: 100%, breakable: false)[
-  Mer simplified versjon under.
-
   #align(center)[
     #figure(
       image(
@@ -104,14 +105,14 @@ Dette dokumentet inneholder svar på tegne-oppgavene i oblig 2b. Jeg har også v
   == b.
   @towel viser listen før det første kallet på `set-car!`. @rart viser listen etter det første kallet, men før det andre kallet. #v(2pt)
 
-  Vi benytter `set-car!` på `(car bah)`, eller 42. Denne verdien er delt og vises 2 steder i listen vår. Når vi reassigner den vil den endres begge steder. Derfor gir det mening at vi får `((42 towel) 42 towel)` etter det siste kallet.
+  Vi benytter `set-car!` på `bah`. Før kallet er dette `'bring`. Kallet endrer pekeren til å peke på det samme som `(cdr bah)`. `car` og `cdr` av `bah` peker altså på den samme delte dataen. Listen ser på dette punktet slik ut: `((a towel) a towel)`. Vi setter videre `(caar bah)`, som peker på `'a` til `42`. Siden denne dataen er delt ser vi endringen i `cdr` av `bah` også: `((42 towel) 42 towel)`.
 
   #align(center)[
     #figure(
       image(
         "diagrams/towel-cons-diagram.svg", width: 60%
       ),
-      caption: [towel]
+      caption: [Liste '(bring a towel).]
     ) <towel>
   ]
 
@@ -120,11 +121,9 @@ Dette dokumentet inneholder svar på tegne-oppgavene i oblig 2b. Jeg har også v
       image(
         "diagrams/towel-cons-diagram-weird.svg", width: 60%
       ),
-      caption: [weird towel]
+      caption: [Liste hvor `car` og `cdr` peker samme sted.]
     ) <rart>
   ]
-
-  Det ville endre flere steder ja.
 ]
 
 #block(width: 100%, breakable: false)[
@@ -134,10 +133,7 @@ Dette dokumentet inneholder svar på tegne-oppgavene i oblig 2b. Jeg har også v
 
 #block(width: 100%, breakable: false)[
   == d.
-  `list?`-predikatet virker ved følgende algoritme:
-  1. Den tomme listen er en liste. \
-  2. Par er en liste dersom `cdr` av paret er en liste. \
-  Med andre ord kalles `cdr` inntil man treffer den tomme listen. Siden sykliske lister ikke inneholder den tomme listen, vil de ikke oppfylle denne testen.
+  Ifølge #link("https://conservatory.scheme.org/schemers/Documents/Standards/R5RS/r5rs.pdf")[R5RS-spesifikasjonen, seksjon 6.3.2] er en liste av endelig lengde og slutter med `'()`. `bah` er av endelig lengde, og den slutter med `'()`. Derfor er det en liste. Siden sykliske lister er undelige, er de ikke lister. I og med at `list?` gir et resultat på sykliske lister som `bar`, kan vi konkludere med at predikatet benytter en eller annen for sykel-sjekk.
 ]
 
 #pagebreak()
